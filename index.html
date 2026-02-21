@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>M5Atom OBD-II ダッシュボード v4.0</title>
+<style>
+/* ===== Reset & Base ===== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  width:100%; height:100%; height:100dvh;
+  background:#0a0a0a; color:#fff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  overflow:hidden; display:flex; flex-direction:column;
+  touch-action:manipulation; user-select:none; -webkit-user-select:none;
+}
+
+/* ===== View System ===== */
+.view { display:none; flex:1; flex-direction:column; overflow:hidden; }
+.view.active { display:flex; }
+
+/* ===== Top Bar ===== */
+#top-bar {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:6px 12px; background:#111; border-bottom:1px solid #222;
+  flex-shrink:0; height:44px;
+}
+#status-dot { width:10px; height:10px; border-radius:50%; background:#555; flex-shrink:0; }
+#status-dot.connected { background:#00e676; box-shadow:0 0 8px #00e676; }
+#status-txt { font-size:.8rem; color:#888; margin-left:6px; }
+#can-status { font-size:.75rem; padding:2px 8px; border-radius:4px; background:#222; color:#aaa; }
+#can-status.ok  { background:#0d2b0d; color:#00e676; }
+#can-status.err { background:#2b0d0d; color:#ff4444; }
+.tab-btn {
+  background:none; border:none; color:#888; font-size:1.2rem;
+  padding:4px 8px; cursor:pointer; border-radius:6px; transition:background .15s;
+}
+.tab-btn.active { color:#fff; background:#333; }
+.tab-btn:active { background:#444; }
+
+/* ===== Connect Overlay ===== */
+#connect-overlay {
+  position:absolute; inset:0; display:flex; flex-direction:column;
+  justify-content:center; align-items:center; background:#0a0a0a; z-index:50;
+}
+#connect-btn {
+  width:160px; height:160px; border-radius:50%; border:3px solid #007bff;
+  background:rgba(0,123,255,.1); color:#007bff; font-size:1.2rem; font-weight:700;
+  cursor:pointer; display:flex; flex-direction:column; justify-content:center;
+  align-items:center; gap:4px; transition:all .2s;
+}
+#connect-btn:active { transform:scale(.95); background:rgba(0,123,255,.3); }
+#connect-hint { margin-top:16px; color:#555; font-size:.8rem; text-align:center; }
+#mode-badge {
+  margin-top:10px; padding:4px 14px; border-radius:20px; font-size:.8rem; font-weight:700;
+  background:#1a3a1a; color:#4caf50; border:1px solid #4caf50; display:none;
+}
+
+/* ===== OBD Dashboard View ===== */
+#view-obd { background:#000; position:relative; }
+#obd-grid {
+  display:grid; gap:6px; padding:8px; width:100%; height:100%;
+  grid-template-columns: repeat(2, 1fr);
+  grid-template-rows: repeat(4, 1fr);
+}
+@media (orientation:landscape) {
+  #obd-grid { grid-template-columns:repeat(4,1fr); grid-template-rows:repeat(2,1fr); }
+}
+
+.obd-cell {
+  background:#111; border:1.5px solid #252525; border-radius:12px;
+  display:flex; flex-direction:column; justify-content:center; align-items:center;
+  position:relative; overflow:hidden; cursor:pointer;
+  transition:border-color .2s;
+}
+.obd-cell:active { background:#1a1a1a; }
+.obd-cell.alarm  { border-color:#ff4444 !important; animation:alarm-blink .8s infinite; }
+@keyframes alarm-blink {
+  0%,100% { box-shadow:0 0 0 rgba(255,68,68,0); }
+  50%      { box-shadow:0 0 12px rgba(255,68,68,.6); }
+}
+
+.cell-label { position:absolute; top:6px; left:0; width:100%; text-align:center; font-size:.65rem; color:#666; text-transform:uppercase; letter-spacing:.05em; }
+.cell-value {
+  font-family:'Courier New',monospace; font-weight:700;
+  font-size:clamp(1.6rem, 7vw, 2.8rem);
+  line-height:1;
+}
+.cell-unit  { position:absolute; bottom:5px; right:8px; font-size:.6rem; color:#555; }
+.cell-bar   { position:absolute; bottom:0; left:0; height:3px; border-radius:0 0 10px 10px; transition:width .3s; }
+
+/* Color classes */
+.c-green  { color:#00e676; }
+.c-cyan   { color:#00e5ff; }
+.c-yellow { color:#ffd740; }
+.c-orange { color:#ff9100; }
+.c-red    { color:#ff4444; }
+.c-blue   { color:#448aff; }
+.c-purple { color:#e040fb; }
+.c-gray   { color:#444; }
+
+/* ===== Keypad View ===== */
+#view-keypad { position:relative; }
+#keypad-grid {
+  display:grid; gap:8px; padding:8px; flex:1;
+  grid-template-columns:repeat(2,1fr); grid-template-rows:repeat(4,1fr);
+}
+@media (orientation:landscape) {
+  #keypad-grid { grid-template-columns:repeat(4,1fr); grid-template-rows:repeat(2,1fr); }
+}
+.key-btn {
+  background:#1a1a1a; border:2px solid var(--bc,#444); border-radius:10px;
+  color:var(--bc,#fff); font-weight:700; cursor:pointer;
+  display:flex; flex-direction:column; justify-content:center; align-items:center;
+  font-size:clamp(1rem,5vw,1.8rem); transition:all .1s;
+  touch-action:none;
+}
+.key-btn.on {
+  background:var(--bc,#006000); color:#fff;
+  box-shadow:0 0 14px var(--bc,rgba(0,255,0,.4));
+}
+.key-btn:active { transform:scale(.97); }
+
+/* ===== Settings View ===== */
+#view-settings { overflow-y:auto; background:#111; }
+.settings-inner {
+  max-width:460px; margin:0 auto; padding:12px;
+  display:flex; flex-direction:column; gap:14px;
+}
+.sett-hdr {
+  display:flex; align-items:center; padding:10px 0;
+  border-bottom:1px solid #333; flex-shrink:0;
+}
+.sett-hdr h2 { flex:1; text-align:center; font-size:1rem; }
+.back-btn { background:none; border:none; color:#aaa; font-size:1.3rem; cursor:pointer; padding:8px; }
+
+.sect-title { color:#888; font-size:.75rem; text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px; }
+
+.row-inp { display:flex; gap:6px; align-items:center; background:#1a1a1a; padding:8px; border-radius:8px; }
+.row-inp label { color:#aaa; font-size:.8rem; min-width:48px; }
+.inp {
+  flex:1; background:#222; border:1px solid #444; color:#fff; padding:8px;
+  border-radius:6px; text-align:center; font-family:monospace; font-size:.9rem;
+}
+select.inp { cursor:pointer; }
+
+.action-btn {
+  width:100%; padding:12px; font-size:.95rem; border-radius:8px; border:none;
+  color:#fff; cursor:pointer; font-weight:700; display:flex;
+  justify-content:center; align-items:center; gap:6px;
+}
+.btn-blue   { background:#1565c0; }
+.btn-orange { background:#e65100; }
+.btn-green  { background:#2e7d32; }
+.btn-red    { background:#b71c1c; }
+.btn-gray   { background:#37474f; }
+
+/* OBD Cell Config ===== */
+.cell-cfg-grid {
+  display:grid; grid-template-columns:repeat(4,1fr); gap:6px;
+}
+.cell-cfg-item {
+  background:#1a1a1a; border:2px solid #333; border-radius:8px;
+  padding:8px 4px; text-align:center; cursor:pointer; font-size:.75rem; color:#888;
+  display:flex; flex-direction:column; gap:3px; align-items:center;
+}
+.cell-cfg-item.editing { border-color:#007bff; color:#fff; }
+.cell-cfg-item .cnum { font-size:1.1rem; font-weight:700; color:#555; }
+.cell-cfg-item.editing .cnum { color:#007bff; }
+
+/* PID Picker */
+.pid-picker {
+  display:grid; grid-template-columns:repeat(2,1fr); gap:5px;
+  max-height:240px; overflow-y:auto;
+}
+.pid-opt {
+  background:#1a1a1a; border:1.5px solid #333; border-radius:6px; padding:8px;
+  text-align:center; cursor:pointer; display:flex; flex-direction:column; gap:2px;
+}
+.pid-opt.selected { border-color:#ffd740; background:#2a2500; }
+.pid-opt .pname { font-size:.9rem; font-weight:700; color:#ffd740; }
+.pid-opt .pdesc { font-size:.65rem; color:#888; }
+
+#log-area {
+  background:#000; color:#0f0; font-family:monospace; font-size:.65rem;
+  padding:6px; border-radius:6px; height:80px; overflow-y:auto; border:1px solid #333;
+}
+
+/* Sync Flash */
+#sync-bar {
+  display:none; position:fixed; top:44px; left:0; right:0; height:3px;
+  background: linear-gradient(90deg,transparent,#007bff,transparent);
+  animation:syncani .6s ease; z-index:100;
+}
+@keyframes syncani { 0%{transform:translateX(-100%)} 100%{transform:translateX(100%)} }
+</style>
+</head>
+<body>
+
+<!-- Top Bar -->
+<div id="top-bar">
+  <div style="display:flex;align-items:center;gap:6px;">
+    <div id="status-dot"></div>
+    <span id="status-txt">未接続</span>
+    <span id="can-status">CAN: --</span>
+  </div>
+  <div style="display:flex;gap:2px;">
+    <button class="tab-btn active" id="tab-obd"     onclick="switchView('obd')">📟</button>
+    <button class="tab-btn"        id="tab-keypad"  onclick="switchView('keypad')">🎛️</button>
+    <button class="tab-btn"        id="tab-settings"onclick="switchView('settings')">⚙️</button>
+  </div>
+</div>
+<div id="sync-bar"></div>
+
+<!-- ============ OBD View ============ -->
+<div id="view-obd" class="view active">
+  <!-- Connect Overlay -->
+  <div id="connect-overlay">
+    <button id="connect-btn" onclick="doConnect()">🔌<br>CONNECT</button>
+    <div id="connect-hint">BLE で接続<br>M5AtomS3_OBD</div>
+    <div id="mode-badge">OBD MODE</div>
+  </div>
+
+  <div id="obd-grid">
+    <!-- 8 cells generated by JS -->
+  </div>
+</div>
+
+<!-- ============ Keypad View ============ -->
+<div id="view-keypad" class="view">
+  <div id="keypad-grid"></div>
+</div>
+
+<!-- ============ Settings View ============ -->
+<div id="view-settings" class="view">
+  <div class="settings-inner">
+    <div class="sett-hdr">
+      <button class="back-btn" onclick="switchView('obd')">‹</button>
+      <h2>設定 Settings</h2>
+      <div style="width:40px;"></div>
+    </div>
+
+    <!-- Mode Toggle -->
+    <div>
+      <div class="sect-title">動作モード</div>
+      <div style="display:flex;gap:8px;">
+        <button class="action-btn btn-green" style="flex:1" onclick="sendModeOBD()">🔍 OBD モード</button>
+        <button class="action-btn btn-gray"  style="flex:1" onclick="sendModeCAN()">📡 CAN モード</button>
+      </div>
+    </div>
+
+    <!-- OBD Cell PID Select -->
+    <div>
+      <div class="sect-title">OBD セル設定（タップで選択）</div>
+      <div class="cell-cfg-grid" id="cell-cfg-grid"></div>
+      <div style="margin-top:8px; background:#1a1a1a; border-radius:8px; padding:8px;">
+        <div style="font-size:.75rem;color:#aaa;margin-bottom:6px;">PID を選択：<span id="editing-cell-lbl" style="color:#007bff;">セル1</span></div>
+        <div class="pid-picker" id="pid-picker"></div>
+      </div>
+      <button class="action-btn btn-orange" style="margin-top:8px;" onclick="applyOBDPIDs()">✔ デバイスに送信 (SET_PIDS)</button>
+    </div>
+
+    <!-- CAN TX ID -->
+    <div>
+      <div class="sect-title">CAN TX ID (キーパッドモード)</div>
+      <div class="row-inp">
+        <label>PAD: 0x</label>
+        <input class="inp" id="pad-inp" type="text" maxlength="3" value="100">
+        <button class="action-btn btn-orange" style="width:auto;padding:10px;" onclick="setPadId()">SET</button>
+      </div>
+    </div>
+
+    <!-- Btn Config -->
+    <div>
+      <div class="sect-title">ボタン設定 (キーパッド)</div>
+      <div id="btn-cfg-list" style="display:flex;flex-direction:column;gap:6px;"></div>
+    </div>
+
+    <!-- Alarm Settings per cell -->
+    <div>
+      <div class="sect-title">セルアラーム設定</div>
+      <div id="alarm-cfg-list" style="display:flex;flex-direction:column;gap:6px;"></div>
+    </div>
+
+    <!-- Export / Import -->
+    <div>
+      <div class="sect-title">設定バックアップ</div>
+      <div style="display:flex;gap:8px;">
+        <button class="action-btn btn-blue"   onclick="exportCfg()">⬇ 保存</button>
+        <button class="action-btn btn-orange" onclick="document.getElementById('import-inp').click()">⬆ 読込</button>
+      </div>
+      <input type="file" id="import-inp" accept=".json" style="display:none" onchange="importCfg(this)">
+    </div>
+
+    <div id="log-area">ログ...</div>
+    <div style="text-align:center;color:#444;font-size:.7rem;padding-bottom:16px;">
+      M5Atom OBD-II Dashboard v4.0
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+// =============================================
+// CONSTANTS
+// =============================================
+const SVC_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const TX_UUID  = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // device→phone
+const RX_UUID  = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; // phone→device
+
+// All supported OBD PIDs on device
+const OBD_PID_LIST = [
+  { pid:"0C", name:"RPM",   desc:"エンジン回転数",   unit:"rpm",  color:"#00e676", max:8000 },
+  { pid:"0D", name:"SPD",   desc:"車速",             unit:"km/h", color:"#00e5ff", max:240 },
+  { pid:"05", name:"CLT",   desc:"冷却水温",         unit:"°C",   color:"#ff9100", max:120 },
+  { pid:"04", name:"LOAD",  desc:"エンジン負荷",     unit:"%",    color:"#ffd740", max:100 },
+  { pid:"11", name:"TPS",   desc:"スロットル開度",   unit:"%",    color:"#e040fb", max:100 },
+  { pid:"0F", name:"IAT",   desc:"吸気温度",         unit:"°C",   color:"#448aff", max:80  },
+  { pid:"0B", name:"MAP",   desc:"吸気管圧力",       unit:"kPa",  color:"#40c4ff", max:200 },
+  { pid:"10", name:"MAF",   desc:"空気流量",         unit:"g/s",  color:"#69f0ae", max:200 },
+  { pid:"5C", name:"OILT",  desc:"エンジン油温",     unit:"°C",   color:"#ff6d00", max:150 },
+  { pid:"0E", name:"TADV",  desc:"点火時期",         unit:"°",    color:"#ea80fc", max:50  },
+  { pid:"2F", name:"FUEL",  desc:"燃料レベル",       unit:"%",    color:"#ffff00", max:100 },
+  { pid:"46", name:"AIRT",  desc:"外気温",           unit:"°C",   color:"#80d8ff", max:50  },
+  { pid:"5E", name:"FRATE", desc:"燃料消費量",       unit:"L/h",  color:"#ff5722", max:30  },
+  { pid:"62", name:"TRQ",   desc:"エンジントルク",   unit:"%",    color:"#b2ff59", max:150 },
+  { pid:"06", name:"STFT1", desc:"短期燃料トリム",   unit:"%",    color:"#82b1ff", max:50  },
+  { pid:"07", name:"LTFT1", desc:"長期燃料トリム",   unit:"%",    color:"#a5d6a7", max:50  },
+];
+
+const PID_BY_NAME = {};
+OBD_PID_LIST.forEach(p => { PID_BY_NAME[p.name] = p; });
+
+const NUM_CELLS = 8;
+
+// =============================================
+// STATE
+// =============================================
+let ble, gatt, rxChar, txChar;
+let isConnected = false;
+let deviceMode  = -1;  // 0=CAN, 1=OBD
+let canOk       = null;
+
+// OBD cell assignments (8 cells, each stores PID name or null)
+let cellPIDs = JSON.parse(localStorage.getItem("cellPIDs")) || [
+  "RPM","SPD","CLT","LOAD","TPS","IAT","MAP","MAF"
+];
+
+// OBD latest values: name -> number
+const obdVals = {};
+
+// Keypad state
+let btnLabels = JSON.parse(localStorage.getItem("btnLabels")) || Array.from({length:8},(_,i)=>`BTN${i+1}`);
+let btnOnVals  = JSON.parse(localStorage.getItem("btnOnVals"))  || Array(8).fill("01");
+let btnOffVals = JSON.parse(localStorage.getItem("btnOffVals")) || Array(8).fill("00");
+let btnColors  = JSON.parse(localStorage.getItem("btnColors"))  || Array(8).fill("#00FF00");
+let btnStates  = Array(8).fill(false);
+
+// Alarm config per cell: {mode:"high"|"low", val:number|null}
+let cellAlarms = JSON.parse(localStorage.getItem("cellAlarms")) || Array(8).fill(null).map(()=>({mode:"high",val:null}));
+
+// Settings: which cell is being edited
+let editingCell = 0;
+
+let canIdVal = localStorage.getItem("canIdVal") || "100";
+document.getElementById("pad-inp").value = canIdVal;
+
+// =============================================
+// LOG
+// =============================================
+function log(msg) {
+  const el = document.getElementById("log-area");
+  const ts = new Date().toLocaleTimeString("ja",{hour12:false});
+  el.textContent = `[${ts}] ${msg}\n` + el.textContent.slice(0,2000);
+}
+
+// =============================================
+// VIEW SWITCH
+// =============================================
+function switchView(v) {
+  document.querySelectorAll(".view").forEach(el => el.classList.remove("active"));
+  document.querySelectorAll(".tab-btn").forEach(el => el.classList.remove("active"));
+  document.getElementById(`view-${v}`).classList.add("active");
+  const tb = document.getElementById(`tab-${v}`);
+  if (tb) tb.classList.add("active");
+}
+
+// =============================================
+// BLE
+// =============================================
+async function doConnect() {
+  if (!navigator.bluetooth) { alert("WebBluetooth 非対応ブラウザ"); return; }
+  try {
+    log("スキャン中...");
+    ble = await navigator.bluetooth.requestDevice({
+      filters:[{name:"M5AtomS3_OBD"}],
+      optionalServices:[SVC_UUID]
+    });
+    ble.addEventListener("gattserverdisconnected", onDisconnect);
+    gatt = await ble.gatt.connect();
+    const svc = await gatt.getPrimaryService(SVC_UUID);
+    txChar = await svc.getCharacteristic(TX_UUID);
+    rxChar = await svc.getCharacteristic(RX_UUID);
+    await txChar.startNotifications();
+    txChar.addEventListener("characteristicvaluechanged", onNotify);
+    setConnected(true);
+    sendRaw("GETCONFIG");
+    log("接続完了");
+  } catch(e) {
+    log("接続失敗: " + e.message);
+  }
+}
+
+function onDisconnect() {
+  setConnected(false);
+  log("切断");
+}
+
+function setConnected(v) {
+  isConnected = v;
+  document.getElementById("status-dot").className = v ? "connected" : "";
+  document.getElementById("status-txt").textContent = v ? "接続中" : "未接続";
+  if (v) {
+    document.getElementById("connect-overlay").style.display = "none";
+  } else {
+    document.getElementById("connect-overlay").style.display = "flex";
+    document.getElementById("mode-badge").style.display = "none";
+  }
+}
+
+async function sendRaw(str) {
+  if (!isConnected || !rxChar) return;
+  try {
+    const buf = new TextEncoder().encode(str);
+    await rxChar.writeValue(buf);
+    log("→ " + str);
+  } catch(e) { log("送信失敗: " + e); }
+}
+
+// =============================================
+// BLE RECEIVE
+// =============================================
+function onNotify(evt) {
+  const txt = new TextDecoder().decode(evt.target.value).trim();
+
+  if (txt.startsWith("OBD=")) {
+    parseOBDBundle(txt.slice(4));
+    flashSync();
+    return;
+  }
+  if (txt.startsWith("STATUS=")) {
+    const ok = txt.includes("CAN_OK");
+    canOk = ok;
+    const el = document.getElementById("can-status");
+    el.textContent = ok ? "CAN: OK" : "CAN: ERR";
+    el.className = ok ? "ok" : "err";
+    return;
+  }
+  if (txt.startsWith("MODE=")) {
+    deviceMode = parseInt(txt.slice(5));
+    const badge = document.getElementById("mode-badge");
+    badge.style.display = "block";
+    badge.textContent = deviceMode === 1 ? "OBD MODE" : "CAN MODE";
+    log("Mode: " + (deviceMode===1?"OBD":"CAN"));
+    return;
+  }
+  if (txt.startsWith("PIDS=")) {
+    log("Active PIDs: " + txt.slice(5));
+    return;
+  }
+  if (txt.startsWith("STATE=")) {
+    const vals = txt.slice(6).split(",").map(Number);
+    vals.forEach((v,i) => {
+      btnStates[i] = v > 0;
+      const el = document.getElementById(`kbtn-${i}`);
+      if (el) el.classList.toggle("on", btnStates[i]);
+    });
+    return;
+  }
+  if (txt.startsWith("TEMP=")) {
+    const v = parseInt(txt.slice(5));
+    obdVals["EXHT"] = v;
+    return;
+  }
+  // Individual VAL= (CAN mode monitors)
+  const valMatch = txt.match(/^(VAL\d*|VAL)=(-?\d+\.?\d*)$/);
+  if (valMatch) {
+    const slotStr = valMatch[1].replace("VAL","") || "0";
+    const slotIdx = parseInt(slotStr) || 0;
+    // Map to generic "RX_N" key
+    obdVals[`RX_${slotIdx}`] = parseFloat(valMatch[2]);
+    return;
+  }
+  log("← " + txt);
+}
+
+function parseOBDBundle(str) {
+  // Format: RPM:3200,SPD:65,...
+  str.split(",").forEach(pair => {
+    const [name, valStr] = pair.split(":");
+    if (name && valStr !== undefined) {
+      obdVals[name.trim()] = parseFloat(valStr.trim());
+    }
+  });
+  updateOBDGrid();
+}
+
+function flashSync() {
+  const bar = document.getElementById("sync-bar");
+  bar.style.display = "block";
+  setTimeout(() => bar.style.display = "none", 600);
+}
+
+// =============================================
+// OBD GRID RENDER
+// =============================================
+function buildOBDGrid() {
+  const grid = document.getElementById("obd-grid");
+  grid.innerHTML = "";
+  for (let i = 0; i < NUM_CELLS; i++) {
+    const cell = document.createElement("div");
+    cell.className = "obd-cell";
+    cell.id = `obd-cell-${i}`;
+    cell.onclick = () => { switchView("settings"); openCellEdit(i); };
+
+    const pidName = cellPIDs[i];
+    const p = pidName ? PID_BY_NAME[pidName] : null;
+    const color = p ? p.color : "#444";
+
+    cell.innerHTML = `
+      <div class="cell-label" id="clabel-${i}">${p ? p.desc : "タップで選択"}</div>
+      <div class="cell-value c-gray" id="cval-${i}" style="color:${color};">--</div>
+      <div class="cell-unit" id="cunit-${i}">${p ? p.unit : ""}</div>
+      <div class="cell-bar" id="cbar-${i}" style="background:${color};width:0%"></div>
+    `;
+    grid.appendChild(cell);
+  }
+}
+
+function updateOBDGrid() {
+  for (let i = 0; i < NUM_CELLS; i++) {
+    const pidName = cellPIDs[i];
+    if (!pidName) continue;
+    const p = PID_BY_NAME[pidName];
+    if (!p) continue;
+    const val = obdVals[pidName];
+    const valEl  = document.getElementById(`cval-${i}`);
+    const barEl  = document.getElementById(`cbar-${i}`);
+    const cellEl = document.getElementById(`obd-cell-${i}`);
+    if (!valEl) continue;
+
+    if (val === undefined || val === null) {
+      valEl.textContent = "--";
+      if (barEl) barEl.style.width = "0%";
+      continue;
+    }
+    const dispVal = Number.isInteger(val) ? val : val.toFixed(1);
+    valEl.textContent = dispVal;
+
+    // Bar
+    if (barEl && p.max) {
+      const pct = Math.min(100, Math.max(0, (val / p.max) * 100));
+      barEl.style.width = pct + "%";
+    }
+
+    // Alarm check
+    const alm = cellAlarms[i];
+    if (alm && alm.val !== null) {
+      const isAlarm = alm.mode === "high" ? val >= alm.val : val <= alm.val;
+      cellEl.classList.toggle("alarm", isAlarm);
+    } else {
+      cellEl.classList.remove("alarm");
+    }
+  }
+}
+
+// =============================================
+// CELL EDIT (Settings)
+// =============================================
+function buildCellCfgGrid() {
+  const grid = document.getElementById("cell-cfg-grid");
+  grid.innerHTML = "";
+  for (let i = 0; i < NUM_CELLS; i++) {
+    const el = document.createElement("div");
+    el.className = "cell-cfg-item" + (i === editingCell ? " editing" : "");
+    el.id = `ccfg-${i}`;
+    el.onclick = () => openCellEdit(i);
+    const pidName = cellPIDs[i] || "---";
+    el.innerHTML = `<div class="cnum">${i+1}</div><div style="font-size:.75rem;">${pidName}</div>`;
+    grid.appendChild(el);
+  }
+  document.getElementById("editing-cell-lbl").textContent = `セル ${editingCell+1}`;
+}
+
+function openCellEdit(idx) {
+  editingCell = idx;
+  buildCellCfgGrid();
+  buildPIDPicker();
+}
+
+function buildPIDPicker() {
+  const picker = document.getElementById("pid-picker");
+  picker.innerHTML = "";
+  const currentPID = cellPIDs[editingCell];
+
+  // "なし" option
+  const noneEl = document.createElement("div");
+  noneEl.className = "pid-opt" + (!currentPID ? " selected" : "");
+  noneEl.innerHTML = `<div class="pname" style="color:#aaa;">なし</div><div class="pdesc">表示しない</div>`;
+  noneEl.onclick = () => { cellPIDs[editingCell] = null; saveCellPIDs(); buildCellCfgGrid(); buildPIDPicker(); buildOBDGrid(); };
+  picker.appendChild(noneEl);
+
+  OBD_PID_LIST.forEach(p => {
+    const el = document.createElement("div");
+    el.className = "pid-opt" + (currentPID === p.name ? " selected" : "");
+    el.innerHTML = `<div class="pname" style="color:${p.color};">${p.name}</div><div class="pdesc">${p.desc}</div>`;
+    el.onclick = () => {
+      cellPIDs[editingCell] = p.name;
+      saveCellPIDs();
+      buildCellCfgGrid();
+      buildPIDPicker();
+      buildOBDGrid();
+    };
+    picker.appendChild(el);
+  });
+}
+
+function saveCellPIDs() {
+  localStorage.setItem("cellPIDs", JSON.stringify(cellPIDs));
+}
+
+// =============================================
+// ALARM CONFIG
+// =============================================
+function buildAlarmCfgList() {
+  const list = document.getElementById("alarm-cfg-list");
+  list.innerHTML = "";
+  for (let i = 0; i < NUM_CELLS; i++) {
+    const pidName = cellPIDs[i];
+    const p = pidName ? PID_BY_NAME[pidName] : null;
+    const alm = cellAlarms[i];
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;gap:6px;align-items:center;background:#1a1a1a;padding:8px;border-radius:8px;";
+    row.innerHTML = `
+      <div style="min-width:56px;font-size:.8rem;color:${p?p.color:'#555'};">${p?p.name:`セル${i+1}`}</div>
+      <select class="inp" style="flex:.6;" onchange="setAlarmMode(${i},this.value)">
+        <option value="high" ${alm.mode==='high'?'selected':''}>≧ Over</option>
+        <option value="low"  ${alm.mode==='low'? 'selected':''}>≦ Under</option>
+      </select>
+      <input class="inp" type="number" placeholder="OFF" value="${alm.val===null?'':alm.val}"
+             style="flex:1;" oninput="setAlarmVal(${i},this.value)">
+    `;
+    list.appendChild(row);
+  }
+}
+
+function setAlarmMode(idx, mode) {
+  cellAlarms[idx].mode = mode;
+  localStorage.setItem("cellAlarms", JSON.stringify(cellAlarms));
+}
+function setAlarmVal(idx, v) {
+  cellAlarms[idx].val = v === "" ? null : parseFloat(v);
+  localStorage.setItem("cellAlarms", JSON.stringify(cellAlarms));
+}
+
+// =============================================
+// KEYPAD
+// =============================================
+function buildKeypadGrid() {
+  const grid = document.getElementById("keypad-grid");
+  grid.innerHTML = "";
+  for (let i = 0; i < 8; i++) {
+    const btn = document.createElement("div");
+    btn.id = `kbtn-${i}`;
+    btn.className = "key-btn" + (btnStates[i] ? " on" : "");
+    btn.style.setProperty("--bc", btnColors[i]);
+    btn.textContent = btnLabels[i];
+    btn.addEventListener("pointerdown", e => { e.preventDefault(); handleBtnDown(i); });
+    btn.addEventListener("pointerup",   e => { handleBtnUp(i); });
+    grid.appendChild(btn);
+  }
+}
+
+function handleBtnDown(i) {
+  document.getElementById(`kbtn-${i}`).classList.add("active");
+}
+function handleBtnUp(i) {
+  document.getElementById(`kbtn-${i}`)?.classList.remove("active");
+  // Toggle
+  btnStates[i] = !btnStates[i];
+  const val = btnStates[i] ? parseInt(btnOnVals[i],16) : parseInt(btnOffVals[i],16);
+  document.getElementById(`kbtn-${i}`)?.classList.toggle("on", btnStates[i]);
+  sendRaw(`${i+1}=${val}`);
+}
+
+function buildBtnCfgList() {
+  const list = document.getElementById("btn-cfg-list");
+  list.innerHTML = "";
+  for (let i = 0; i < 8; i++) {
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;gap:4px;align-items:center;background:#1a1a1a;padding:6px;border-radius:8px;flex-wrap:wrap;";
+    row.innerHTML = `
+      <input type="color" value="${btnColors[i]}" style="width:30px;height:30px;border:none;background:none;cursor:pointer;"
+             onchange="btnColors[${i}]=this.value;localStorage.setItem('btnColors',JSON.stringify(btnColors));buildKeypadGrid();">
+      <input class="inp" type="text" placeholder="ラベル" value="${btnLabels[i]}" maxlength="8" style="flex:1;min-width:60px;"
+             oninput="btnLabels[${i}]=this.value;localStorage.setItem('btnLabels',JSON.stringify(btnLabels));buildKeypadGrid();">
+      <input class="inp" type="text" placeholder="ON(hex)" value="${btnOnVals[i]}" maxlength="2" style="width:52px;"
+             oninput="btnOnVals[${i}]=this.value;localStorage.setItem('btnOnVals',JSON.stringify(btnOnVals));">
+      <input class="inp" type="text" placeholder="OFF" value="${btnOffVals[i]}" maxlength="2" style="width:52px;"
+             oninput="btnOffVals[${i}]=this.value;localStorage.setItem('btnOffVals',JSON.stringify(btnOffVals));">
+    `;
+    list.appendChild(row);
+  }
+}
+
+// =============================================
+// COMMANDS
+// =============================================
+function sendModeOBD() {
+  sendRaw("SET_MODE=1");
+  log("OBDモードに切替");
+}
+function sendModeCAN() {
+  sendRaw("SET_MODE=0");
+  log("CANモードに切替");
+}
+
+function setPadId() {
+  const v = document.getElementById("pad-inp").value.trim();
+  if (!v.match(/^[0-9A-Fa-f]+$/)) { alert("無効なHex値"); return; }
+  canIdVal = v;
+  localStorage.setItem("canIdVal", v);
+  sendRaw(`ID=${v}`);
+}
+
+function applyOBDPIDs() {
+  // Send selected PIDs to device
+  const pids = cellPIDs.filter(Boolean);
+  if (!pids.length) { alert("PIDs が未選択"); return; }
+  const pidHexList = pids.map(name => {
+    const p = PID_BY_NAME[name];
+    return p ? "0x" + p.pid : null;
+  }).filter(Boolean);
+  // Deduplicate
+  const uniq = [...new Set(pidHexList)];
+  sendRaw("SET_PIDS=" + uniq.join(","));
+}
+
+// =============================================
+// EXPORT / IMPORT
+// =============================================
+function exportCfg() {
+  const cfg = { cellPIDs, cellAlarms, btnLabels, btnOnVals, btnOffVals, btnColors, canIdVal };
+  const blob = new Blob([JSON.stringify(cfg, null, 2)], {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "obd_config.json";
+  a.click();
+}
+
+function importCfg(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const r = new FileReader();
+  r.onload = e => {
+    try {
+      const cfg = JSON.parse(e.target.result);
+      if (cfg.cellPIDs)  { cellPIDs  = cfg.cellPIDs;  localStorage.setItem("cellPIDs", JSON.stringify(cellPIDs)); }
+      if (cfg.cellAlarms){ cellAlarms= cfg.cellAlarms; localStorage.setItem("cellAlarms",JSON.stringify(cellAlarms)); }
+      if (cfg.btnLabels) { btnLabels = cfg.btnLabels;  localStorage.setItem("btnLabels",JSON.stringify(btnLabels)); }
+      if (cfg.btnOnVals) { btnOnVals = cfg.btnOnVals;  localStorage.setItem("btnOnVals",JSON.stringify(btnOnVals)); }
+      if (cfg.btnOffVals){ btnOffVals= cfg.btnOffVals; localStorage.setItem("btnOffVals",JSON.stringify(btnOffVals)); }
+      if (cfg.btnColors) { btnColors = cfg.btnColors;  localStorage.setItem("btnColors",JSON.stringify(btnColors)); }
+      buildAll();
+      log("設定を読み込みました");
+    } catch(ex) { alert("読込失敗: " + ex); }
+    input.value = "";
+  };
+  r.readAsText(file);
+}
+
+// =============================================
+// INIT
+// =============================================
+function buildAll() {
+  buildOBDGrid();
+  buildKeypadGrid();
+  buildCellCfgGrid();
+  buildPIDPicker();
+  buildBtnCfgList();
+  buildAlarmCfgList();
+}
+
+buildAll();
+log("Dashboard 準備完了");
+</script>
+</body>
+</html>
